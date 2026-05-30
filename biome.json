@@ -11,13 +11,13 @@
 		"rules": {
 			"recommended": true,
 			"correctness": {
-				"noUnusedVariables": "warn",
-				"noUnusedImports": "warn"
+				"noUnusedVariables": "error",
+				"noUnusedImports": "error"
 			},
 			"style": {
-				"noNonNullAssertion": "warn",
-				"useNodejsImportProtocol": "off",
-				"useImportType": "off"
+				"noNonNullAssertion": "error",
+				"useNodejsImportProtocol": "error",
+				"useImportType": "error"
 			}
 		}
 	},
