@@ -1,11 +1,14 @@
 import { LUMA_API_BASE_URL, LUMA_API_KEY_HEADER } from "./constants";
 import { LumaApiError } from "./errors";
 import type {
+	AddGuestsOptions,
 	CreateCalendarCouponInput,
+	CreateTicketTypeInput,
 	GetEventGuestOptions,
 	ListCalendarEventsOptions,
 	ListCalendarPeopleOptions,
 	ListEventGuestsOptions,
+	ListTicketTypesOptions,
 	LumaCalendarEntry,
 	LumaCoupon,
 	LumaCouponEntry,
@@ -14,7 +17,9 @@ import type {
 	LumaGuestEntry,
 	LumaPaginatedResponse,
 	LumaPerson,
+	LumaTicketType,
 	UpdateGuestStatusOptions,
+	UpdateTicketTypeInput,
 } from "./types";
 
 export interface LumaClientOptions {
@@ -47,6 +52,12 @@ const serializeQueryValue = (value: unknown): string =>
 
 const toIso = (value: Date | string): string =>
 	value instanceof Date ? value.toISOString() : value;
+
+/** Like {@link toIso} but passes `null`/`undefined` through untouched, so a
+ * caller can clear a field (`null`) or leave it unset (`undefined`). */
+const toIsoNullable = (
+	value: Date | string | null | undefined,
+): string | null | undefined => (value == null ? value : toIso(value));
 
 /** Drain an async generator into an array. */
 export const collect = async <T>(source: AsyncIterable<T>): Promise<T[]> => {
@@ -342,8 +353,134 @@ export class LumaClient {
 				},
 			});
 		},
+
+		/**
+		 * Add guests to an event (host-side). Registers people directly — this
+		 * does NOT take payment; Luma owns checkout/payment on its hosted flow.
+		 * By default guests are added as approved ("Going") and emailed. Pass a
+		 * `ticketTypeApiId` to assign each guest a ticket of that type.
+		 */
+		addGuests: async (options: AddGuestsOptions): Promise<void> => {
+			await this.request("/v1/events/guests/add", {
+				method: "POST",
+				body: {
+					event_id: options.eventApiId,
+					guests: options.guests.map((guest) => ({
+						email: guest.email,
+						name: guest.name,
+						registration_answers: guest.registrationAnswers,
+					})),
+					ticket: options.ticketTypeApiId
+						? { event_ticket_type_id: options.ticketTypeApiId }
+						: undefined,
+					approval_status: options.approvalStatus,
+					send_email: options.sendEmail,
+				},
+			});
+		},
+
+		/**
+		 * List an event's ticket types (tiers), including prices. Pass
+		 * `includeHidden` to include ticket types not shown on the public page.
+		 */
+		listTicketTypes: async (
+			options: ListTicketTypesOptions,
+		): Promise<LumaTicketType[]> => {
+			const response = await this.request<{ entries?: LumaTicketType[] }>(
+				"/v1/events/ticket-types/list",
+				{
+					query: {
+						event_id: options.eventApiId,
+						include_hidden: options.includeHidden,
+					},
+				},
+			);
+			return response.entries ?? [];
+		},
+
+		/** Fetch a single ticket type by its id. */
+		getTicketType: async (ticketTypeApiId: string): Promise<LumaTicketType> => {
+			const response = await this.request<
+				{ ticket_type?: LumaTicketType } & LumaTicketType
+			>("/v1/events/ticket-types/get", {
+				query: { event_ticket_type_id: ticketTypeApiId },
+			});
+			return response.ticket_type ?? response;
+		},
+
+		/** Create a ticket type on an event. */
+		createTicketType: async (
+			input: CreateTicketTypeInput,
+		): Promise<LumaTicketType> => {
+			const response = await this.request<
+				{ ticket_type?: LumaTicketType } & LumaTicketType
+			>("/v1/events/ticket-types/create", {
+				method: "POST",
+				body: ticketTypeBody(
+					{ event_id: input.eventApiId, type: input.type },
+					input,
+				),
+			});
+			return response.ticket_type ?? response;
+		},
+
+		/** Update an existing ticket type. */
+		updateTicketType: async (
+			input: UpdateTicketTypeInput,
+		): Promise<LumaTicketType> => {
+			const response = await this.request<
+				{ ticket_type?: LumaTicketType } & LumaTicketType
+			>("/v1/events/ticket-types/update", {
+				method: "POST",
+				body: ticketTypeBody(
+					{ event_ticket_type_id: input.ticketTypeApiId, type: input.type },
+					input,
+				),
+			});
+			return response.ticket_type ?? response;
+		},
+
+		/** Delete a ticket type by its id. */
+		deleteTicketType: async (ticketTypeApiId: string): Promise<void> => {
+			await this.request("/v1/events/ticket-types/delete", {
+				method: "POST",
+				body: { event_ticket_type_id: ticketTypeApiId },
+			});
+		},
 	};
 }
+
+/** Build the snake_case body shared by ticket-type create and update. Keys
+ * left `undefined` are dropped by `JSON.stringify`; explicit `null` is sent. */
+const ticketTypeBody = (
+	base: Record<string, unknown>,
+	fields: {
+		name?: string;
+		cents?: number | null;
+		currency?: string | null;
+		requireApproval?: boolean;
+		isHidden?: boolean;
+		description?: string | null;
+		isFlexible?: boolean;
+		minCents?: number | null;
+		maxCapacity?: number | null;
+		validStartAt?: Date | string | null;
+		validEndAt?: Date | string | null;
+	},
+): Record<string, unknown> => ({
+	...base,
+	name: fields.name,
+	cents: fields.cents,
+	currency: fields.currency == null ? fields.currency : fields.currency.toLowerCase(),
+	require_approval: fields.requireApproval,
+	is_hidden: fields.isHidden,
+	description: fields.description,
+	is_flexible: fields.isFlexible,
+	min_cents: fields.minCents,
+	max_capacity: fields.maxCapacity,
+	valid_start_at: toIsoNullable(fields.validStartAt),
+	valid_end_at: toIsoNullable(fields.validEndAt),
+});
 
 const normalizeCoupon = (
 	entry: LumaCouponEntry,

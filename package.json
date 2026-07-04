@@ -1,6 +1,6 @@
 {
 	"name": "@ingram-tech/luma",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "TypeScript client for the Luma (lu.ma) public API.",
 	"license": "MIT",
 	"author": "Ingram Technologies",

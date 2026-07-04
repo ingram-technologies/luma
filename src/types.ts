@@ -148,6 +148,91 @@ export interface UpdateGuestStatusOptions {
 	status: LumaGuestApprovalStatus;
 }
 
+// ─── Ticket types ────────────────────────────────────────────────────────
+
+/**
+ * A ticket type (tier) on an event, as returned by
+ * `/v1/events/ticket-types/*`. Prices are in the currency's minor unit
+ * (`cents`); free tickets carry `type: "free"` and a null price.
+ */
+export interface LumaTicketType {
+	/** Ticket-type id, usually prefixed `evtticktype-`. */
+	id: string;
+	name: string;
+	/** `"free"` or `"paid"`. Luma may introduce further values. */
+	type: "free" | "paid" | (string & {});
+	/** Price in the currency's minor unit (e.g. `4000` = €40), or null. */
+	cents: number | null;
+	/** ISO 4217 code, lower-cased as Luma returns it (e.g. `eur`), or null. */
+	currency: string | null;
+	/** Whether the buyer may choose the amount (pay-what-you-want). */
+	is_flexible?: boolean;
+	/** For flexible tickets, the minimum amount in minor units. */
+	min_cents?: number | null;
+	require_approval?: boolean;
+	is_hidden?: boolean;
+	description?: string | null;
+	valid_start_at?: string | null;
+	valid_end_at?: string | null;
+	max_capacity?: number | null;
+	[key: string]: unknown;
+}
+
+export interface ListTicketTypesOptions {
+	eventApiId: string;
+	/** Include hidden ticket types in the result. */
+	includeHidden?: boolean;
+}
+
+/** Fields shared by ticket-type create and update. */
+interface TicketTypeWriteFields {
+	name?: string;
+	/** Price in the currency's minor unit. Required for paid tickets. */
+	cents?: number | null;
+	/** ISO 4217 code (e.g. `eur`). */
+	currency?: string | null;
+	requireApproval?: boolean;
+	isHidden?: boolean;
+	description?: string | null;
+	/** Pay-what-you-want ticket. */
+	isFlexible?: boolean;
+	minCents?: number | null;
+	maxCapacity?: number | null;
+	validStartAt?: Date | string | null;
+	validEndAt?: Date | string | null;
+}
+
+export interface CreateTicketTypeInput extends TicketTypeWriteFields {
+	eventApiId: string;
+	name: string;
+	type: "free" | "paid";
+}
+
+export interface UpdateTicketTypeInput extends TicketTypeWriteFields {
+	ticketTypeApiId: string;
+	type?: "free" | "paid";
+}
+
+/** A guest to add via {@link import("./client").LumaClient.events.addGuests}. */
+export interface AddGuestInput {
+	email: string;
+	name?: string;
+	/** Answers to the event's registration questions, if any. */
+	registrationAnswers?: unknown[];
+}
+
+export interface AddGuestsOptions {
+	eventApiId: string;
+	/** The guests to add. At least one is required. */
+	guests: AddGuestInput[];
+	/** Assign one ticket of this ticket type to each added guest. */
+	ticketTypeApiId?: string;
+	/** Initial status. Defaults to `approved` ("Going"). */
+	approvalStatus?: LumaGuestApprovalStatus;
+	/** Whether Luma emails each added guest. Defaults to true. */
+	sendEmail?: boolean;
+}
+
 // ─── Coupons ─────────────────────────────────────────────────────────────
 
 export interface LumaCoupon {

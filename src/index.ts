@@ -11,11 +11,15 @@ export {
 } from "./constants";
 export { LumaApiError } from "./errors";
 export type {
+	AddGuestInput,
+	AddGuestsOptions,
 	CreateCalendarCouponInput,
+	CreateTicketTypeInput,
 	GetEventGuestOptions,
 	ListCalendarEventsOptions,
 	ListCalendarPeopleOptions,
 	ListEventGuestsOptions,
+	ListTicketTypesOptions,
 	LumaCalendarEntry,
 	LumaCoupon,
 	LumaCouponEntry,
@@ -28,5 +32,7 @@ export type {
 	LumaPaginatedResponse,
 	LumaPaginationOptions,
 	LumaPerson,
+	LumaTicketType,
 	UpdateGuestStatusOptions,
+	UpdateTicketTypeInput,
 } from "./types";

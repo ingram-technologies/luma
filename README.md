@@ -117,13 +117,16 @@ try {
 | Calendar people | `calendar.listPeople`, `calendar.listAllPeople` |
 | Coupons | `calendar.listCoupons`, `calendar.findCouponByCode`, `calendar.createCoupon` |
 | Events | `events.get` |
-| Guests | `events.listGuests`, `events.listAllGuests`, `events.getGuest`, `events.updateGuestStatus` |
+| Guests | `events.listGuests`, `events.listAllGuests`, `events.getGuest`, `events.updateGuestStatus`, `events.addGuests` |
+| Ticket types | `events.listTicketTypes`, `events.getTicketType`, `events.createTicketType`, `events.updateTicketType`, `events.deleteTicketType` |
 | Anything else | `request`, `paginate` |
 
-Luma does not publish a machine-readable schema. The calendar-events and
-coupon paths are exercised in production; the guest and people paths are
-modelled from Luma's public API documentation. Response objects carry an index
-signature, so unmodelled fields are always reachable. PRs welcome.
+The ticket-type and `addGuests` methods are modelled from Luma's published
+OpenAPI (`https://public-api.luma.com/openapi.json`). Note the API has no
+checkout/payment endpoint — `addGuests` registers a guest host-side but never
+takes payment; ticket purchase happens on Luma's own hosted checkout. Response
+objects carry an index signature, so unmodelled fields are always reachable.
+PRs welcome.
 
 ## Development
 

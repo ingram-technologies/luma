@@ -200,6 +200,93 @@ describe("LumaClient.events", () => {
 			/guestApiId|email/,
 		);
 	});
+
+	it("lists ticket types, returning entries", async () => {
+		const { fetchImpl, calls } = mockFetch(() =>
+			json({
+				entries: [
+					{
+						id: "tt1",
+						name: "Standard",
+						type: "paid",
+						cents: 4000,
+						currency: "eur",
+					},
+				],
+			}),
+		);
+		const client = new LumaClient({ apiKey: "k", fetch: fetchImpl });
+
+		const types = await client.events.listTicketTypes({
+			eventApiId: "evt-1",
+			includeHidden: true,
+		});
+
+		expect(types).toEqual([
+			{ id: "tt1", name: "Standard", type: "paid", cents: 4000, currency: "eur" },
+		]);
+		const call = requireCall(calls, 0);
+		expect(call.url.pathname).toBe("/v1/events/ticket-types/list");
+		expect(call.url.searchParams.get("event_id")).toBe("evt-1");
+		expect(call.url.searchParams.get("include_hidden")).toBe("true");
+	});
+
+	it("creates a paid ticket type with a lower-cased currency", async () => {
+		const { fetchImpl, calls } = mockFetch(() =>
+			json({
+				id: "tt2",
+				name: "VIP",
+				type: "paid",
+				cents: 9900,
+				currency: "eur",
+			}),
+		);
+		const client = new LumaClient({ apiKey: "k", fetch: fetchImpl });
+
+		const created = await client.events.createTicketType({
+			eventApiId: "evt-1",
+			name: "VIP",
+			type: "paid",
+			cents: 9900,
+			currency: "EUR",
+			validEndAt: new Date("2027-03-01T00:00:00.000Z"),
+		});
+
+		expect(created).toMatchObject({ id: "tt2", type: "paid" });
+		const call = requireCall(calls, 0);
+		expect(call.url.pathname).toBe("/v1/events/ticket-types/create");
+		expect(call.init.method).toBe("POST");
+		const body = JSON.parse(call.init.body as string);
+		expect(body).toMatchObject({
+			event_id: "evt-1",
+			name: "VIP",
+			type: "paid",
+			cents: 9900,
+			currency: "eur",
+			valid_end_at: "2027-03-01T00:00:00.000Z",
+		});
+	});
+
+	it("assigns a ticket type when adding a guest", async () => {
+		const { fetchImpl, calls } = mockFetch(() => new Response("", { status: 200 }));
+		const client = new LumaClient({ apiKey: "k", fetch: fetchImpl });
+
+		await client.events.addGuests({
+			eventApiId: "evt-1",
+			guests: [{ email: "a@b.com", name: "Ada" }],
+			ticketTypeApiId: "tt1",
+			sendEmail: false,
+		});
+
+		const call = requireCall(calls, 0);
+		expect(call.url.pathname).toBe("/v1/events/guests/add");
+		expect(JSON.parse(call.init.body as string)).toEqual({
+			event_id: "evt-1",
+			guests: [{ email: "a@b.com", name: "Ada" }],
+			ticket: { event_ticket_type_id: "tt1" },
+			send_email: false,
+		});
+	});
 });
 
 describe("LumaClient.fromEnv", () => {
