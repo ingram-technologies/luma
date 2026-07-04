@@ -6,17 +6,16 @@ import type {
 	CreateTicketTypeInput,
 	GetEventGuestOptions,
 	ListCalendarEventsOptions,
-	ListCalendarPeopleOptions,
+	ListContactsOptions,
 	ListEventGuestsOptions,
 	ListTicketTypesOptions,
-	LumaCalendarEntry,
+	LumaCalendarEvent,
+	LumaContact,
 	LumaCoupon,
-	LumaCouponEntry,
 	LumaEvent,
 	LumaGuest,
-	LumaGuestEntry,
+	LumaGuestDetail,
 	LumaPaginatedResponse,
-	LumaPerson,
 	LumaTicketType,
 	UpdateGuestStatusOptions,
 	UpdateTicketTypeInput,
@@ -114,7 +113,7 @@ export class LumaClient {
 
 	/**
 	 * Low-level request against any Luma endpoint. `path` is taken relative to
-	 * the base URL, e.g. `/v1/event/get`.
+	 * the base URL, e.g. `/v1/events/get`.
 	 */
 	async request<T>(path: string, init: LumaRequestInit = {}): Promise<T> {
 		const url = new URL(path.startsWith("/") ? path : `/${path}`, this.baseUrl);
@@ -209,42 +208,43 @@ export class LumaClient {
 	}
 
 	// ─── calendar ────────────────────────────────────────────────────────
+	//
+	// The calendar is inferred from the API key, so these take no calendar id.
 
 	readonly calendar = {
-		/** Iterate every event on a calendar. */
-		listEvents: (options: ListCalendarEventsOptions) =>
-			this.paginate<LumaCalendarEntry>("/v1/calendar/list-events", {
-				calendar_api_id: options.calendarApiId,
+		/** Iterate every event the calendar manages. */
+		listEvents: (options: ListCalendarEventsOptions = {}) =>
+			this.paginate<LumaCalendarEvent>("/v1/calendars/events/list", {
 				after: options.after,
 				before: options.before,
+				status: options.status,
+				access: options.access,
+				platforms: options.platforms,
+				sort_direction: options.sortDirection,
 				pagination_limit: options.paginationLimit,
 				pagination_cursor: options.paginationCursor,
 			}),
 
-		/** Collect every event on a calendar into an array. */
-		listAllEvents: (options: ListCalendarEventsOptions) =>
+		/** Collect every event the calendar manages into an array. */
+		listAllEvents: (options: ListCalendarEventsOptions = {}) =>
 			collect(this.calendar.listEvents(options)),
 
-		/** Iterate every person who has interacted with a calendar. */
-		listPeople: (options: ListCalendarPeopleOptions) =>
-			this.paginate<LumaPerson>("/v1/calendar/list-people", {
-				calendar_api_id: options.calendarApiId,
+		/** Iterate every contact on the calendar. */
+		listContacts: (options: ListContactsOptions = {}) =>
+			this.paginate<LumaContact>("/v1/calendars/contacts/list", {
+				query: options.query,
+				sort_direction: options.sortDirection,
 				pagination_limit: options.paginationLimit,
 				pagination_cursor: options.paginationCursor,
 			}),
 
-		/** Collect every person on a calendar into an array. */
-		listAllPeople: (options: ListCalendarPeopleOptions) =>
-			collect(this.calendar.listPeople(options)),
+		/** Collect every contact on the calendar into an array. */
+		listAllContacts: (options: ListContactsOptions = {}) =>
+			collect(this.calendar.listContacts(options)),
 
 		/** Iterate every coupon on the calendar tied to the API key. */
-		listCoupons: async function* (this: LumaClient): AsyncGenerator<LumaCoupon> {
-			for await (const entry of this.paginate<LumaCouponEntry>(
-				"/v1/calendar/coupons",
-			)) {
-				yield normalizeCoupon(entry);
-			}
-		}.bind(this),
+		listCoupons: (): AsyncGenerator<LumaCoupon> =>
+			this.paginate<LumaCoupon>("/v1/calendars/coupons/list"),
 
 		/** Find a calendar coupon by its code, or `null` if none matches. */
 		findCouponByCode: async (code: string): Promise<LumaCoupon | null> => {
@@ -257,99 +257,70 @@ export class LumaClient {
 			return null;
 		},
 
-		/** Create a calendar coupon. */
-		createCoupon: async (input: CreateCalendarCouponInput): Promise<LumaCoupon> => {
-			const discount =
-				input.discount.type === "percent"
-					? {
-							discount_type: "percent" as const,
-							percent_off: input.discount.percentOff,
-						}
-					: {
-							discount_type: "amount" as const,
-							cents_off: input.discount.centsOff,
-							currency: input.discount.currency.toLowerCase(),
-						};
-			const response = await this.request<{ coupon?: LumaCouponEntry }>(
-				"/v1/calendar/coupons/create",
-				{
-					method: "POST",
-					body: {
-						code: input.code,
-						remaining_count: input.remainingCount,
-						valid_start_at: input.validStartAt
-							? toIso(input.validStartAt)
-							: undefined,
-						valid_end_at: input.validEndAt
-							? toIso(input.validEndAt)
-							: undefined,
-						discount,
-					},
+		/** Create a calendar coupon (applies to any event the calendar manages). */
+		createCoupon: (input: CreateCalendarCouponInput): Promise<LumaCoupon> =>
+			this.request<LumaCoupon>("/v1/calendars/coupons/create", {
+				method: "POST",
+				body: {
+					code: input.code,
+					remaining_count: input.remainingCount,
+					valid_start_at: toIsoNullable(input.validStartAt),
+					valid_end_at: toIsoNullable(input.validEndAt),
+					discount:
+						input.discount.type === "percent"
+							? {
+									discount_type: "percent",
+									percent_off: input.discount.percentOff,
+								}
+							: {
+									discount_type: "amount",
+									cents_off: input.discount.centsOff,
+									currency: input.discount.currency.toLowerCase(),
+								},
 				},
-			);
-			return normalizeCoupon(response.coupon ?? {}, input.code);
-		},
+			}),
 	};
 
 	// ─── events ──────────────────────────────────────────────────────────
 
 	readonly events = {
-		/** Fetch a single event by its `api_id`. */
-		get: async (eventApiId: string): Promise<LumaEvent> => {
-			const response = await this.request<{ event?: LumaEvent } & LumaEvent>(
-				"/v1/event/get",
-				{ query: { api_id: eventApiId } },
-			);
-			return response.event ?? response;
-		},
+		/** Fetch a single event by its id (`evt-…`). */
+		get: (eventId: string): Promise<LumaEvent> =>
+			this.request<LumaEvent>("/v1/events/get", {
+				query: { event_id: eventId },
+			}),
 
 		/** Iterate every guest of an event. */
 		listGuests: (options: ListEventGuestsOptions) =>
-			async function* (this: LumaClient): AsyncGenerator<LumaGuest> {
-				for await (const entry of this.paginate<LumaGuestEntry>(
-					"/v1/event/get-guests",
-					{
-						event_api_id: options.eventApiId,
-						approval_status: options.approvalStatus,
-						pagination_limit: options.paginationLimit,
-						pagination_cursor: options.paginationCursor,
-					},
-				)) {
-					const guest = entry.guest ?? (entry as unknown as LumaGuest);
-					yield guest;
-				}
-			}.call(this),
+			this.paginate<LumaGuest>("/v1/events/guests/list", {
+				event_id: options.eventId,
+				approval_status: options.approvalStatus,
+				sort_direction: options.sortDirection,
+				pagination_limit: options.paginationLimit,
+				pagination_cursor: options.paginationCursor,
+			}),
 
 		/** Collect every guest of an event into an array. */
 		listAllGuests: (options: ListEventGuestsOptions) =>
 			collect(this.events.listGuests(options)),
 
-		/** Fetch a single guest, by guest `api_id` or by registration email. */
-		getGuest: async (options: GetEventGuestOptions): Promise<LumaGuest> => {
-			if (!options.guestApiId && !options.email) {
-				throw new Error("getGuest requires either `guestApiId` or `email`");
-			}
-			const response = await this.request<{ guest?: LumaGuest } & LumaGuest>(
-				"/v1/event/get-guest",
-				{
-					query: {
-						event_api_id: options.eventApiId,
-						api_id: options.guestApiId,
-						email: options.email,
-					},
-				},
-			);
-			return response.guest ?? response;
-		},
+		/** Fetch a single guest (with order detail) by its guest id. */
+		getGuest: (options: GetEventGuestOptions): Promise<LumaGuestDetail> =>
+			this.request<LumaGuestDetail>("/v1/events/guests/get", {
+				query: { event_id: options.eventId, id: options.guestId },
+			}),
 
 		/** Update a guest's approval status (approve, decline, waitlist…). */
 		updateGuestStatus: async (options: UpdateGuestStatusOptions): Promise<void> => {
-			await this.request("/v1/event/update-guest-status", {
+			await this.request("/v1/events/guests/update-status", {
 				method: "POST",
 				body: {
-					event_api_id: options.eventApiId,
-					guest_api_id: options.guestApiId,
+					event_id: options.eventId,
+					guest_id: options.guestId,
 					status: options.status,
+					should_refund: options.shouldRefund,
+					send_email: options.sendEmail,
+					message: options.message,
 				},
 			});
 		},
@@ -358,20 +329,20 @@ export class LumaClient {
 		 * Add guests to an event (host-side). Registers people directly — this
 		 * does NOT take payment; Luma owns checkout/payment on its hosted flow.
 		 * By default guests are added as approved ("Going") and emailed. Pass a
-		 * `ticketTypeApiId` to assign each guest a ticket of that type.
+		 * `ticketTypeId` to assign each guest a ticket of that type.
 		 */
 		addGuests: async (options: AddGuestsOptions): Promise<void> => {
 			await this.request("/v1/events/guests/add", {
 				method: "POST",
 				body: {
-					event_id: options.eventApiId,
+					event_id: options.eventId,
 					guests: options.guests.map((guest) => ({
 						email: guest.email,
 						name: guest.name,
 						registration_answers: guest.registrationAnswers,
 					})),
-					ticket: options.ticketTypeApiId
-						? { event_ticket_type_id: options.ticketTypeApiId }
+					ticket: options.ticketTypeId
+						? { event_ticket_type_id: options.ticketTypeId }
 						: undefined,
 					approval_status: options.approvalStatus,
 					send_email: options.sendEmail,
@@ -390,7 +361,7 @@ export class LumaClient {
 				"/v1/events/ticket-types/list",
 				{
 					query: {
-						event_id: options.eventApiId,
+						event_id: options.eventId,
 						include_hidden: options.includeHidden,
 					},
 				},
@@ -399,52 +370,36 @@ export class LumaClient {
 		},
 
 		/** Fetch a single ticket type by its id. */
-		getTicketType: async (ticketTypeApiId: string): Promise<LumaTicketType> => {
-			const response = await this.request<
-				{ ticket_type?: LumaTicketType } & LumaTicketType
-			>("/v1/events/ticket-types/get", {
-				query: { event_ticket_type_id: ticketTypeApiId },
-			});
-			return response.ticket_type ?? response;
-		},
+		getTicketType: (ticketTypeId: string): Promise<LumaTicketType> =>
+			this.request<LumaTicketType>("/v1/events/ticket-types/get", {
+				query: { event_ticket_type_id: ticketTypeId },
+			}),
 
 		/** Create a ticket type on an event. */
-		createTicketType: async (
-			input: CreateTicketTypeInput,
-		): Promise<LumaTicketType> => {
-			const response = await this.request<
-				{ ticket_type?: LumaTicketType } & LumaTicketType
-			>("/v1/events/ticket-types/create", {
+		createTicketType: (input: CreateTicketTypeInput): Promise<LumaTicketType> =>
+			this.request<LumaTicketType>("/v1/events/ticket-types/create", {
 				method: "POST",
 				body: ticketTypeBody(
-					{ event_id: input.eventApiId, type: input.type },
+					{ event_id: input.eventId, type: input.type },
 					input,
 				),
-			});
-			return response.ticket_type ?? response;
-		},
+			}),
 
 		/** Update an existing ticket type. */
-		updateTicketType: async (
-			input: UpdateTicketTypeInput,
-		): Promise<LumaTicketType> => {
-			const response = await this.request<
-				{ ticket_type?: LumaTicketType } & LumaTicketType
-			>("/v1/events/ticket-types/update", {
+		updateTicketType: (input: UpdateTicketTypeInput): Promise<LumaTicketType> =>
+			this.request<LumaTicketType>("/v1/events/ticket-types/update", {
 				method: "POST",
 				body: ticketTypeBody(
-					{ event_ticket_type_id: input.ticketTypeApiId, type: input.type },
+					{ event_ticket_type_id: input.ticketTypeId, type: input.type },
 					input,
 				),
-			});
-			return response.ticket_type ?? response;
-		},
+			}),
 
 		/** Delete a ticket type by its id. */
-		deleteTicketType: async (ticketTypeApiId: string): Promise<void> => {
+		deleteTicketType: async (ticketTypeId: string): Promise<void> => {
 			await this.request("/v1/events/ticket-types/delete", {
 				method: "POST",
-				body: { event_ticket_type_id: ticketTypeApiId },
+				body: { event_ticket_type_id: ticketTypeId },
 			});
 		},
 	};
@@ -480,13 +435,4 @@ const ticketTypeBody = (
 	max_capacity: fields.maxCapacity,
 	valid_start_at: toIsoNullable(fields.validStartAt),
 	valid_end_at: toIsoNullable(fields.validEndAt),
-});
-
-const normalizeCoupon = (
-	entry: LumaCouponEntry,
-	fallbackCode?: string,
-): LumaCoupon => ({
-	...entry,
-	api_id: entry.api_id ?? entry.id ?? "",
-	code: entry.code ?? fallbackCode ?? "",
 });

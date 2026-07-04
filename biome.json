@@ -23,6 +23,13 @@
 	},
 	"files": {
 		"ignoreUnknown": true,
-		"includes": ["src/**", "*.ts", "*.json", "!!**/dist", "!!**/node_modules"]
+		"includes": [
+			"src/**",
+			"*.ts",
+			"*.json",
+			"!src/generated/**",
+			"!!**/dist",
+			"!!**/node_modules"
+		]
 	}
 }

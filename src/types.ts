@@ -1,12 +1,15 @@
 /**
  * Types for the Luma public API.
  *
- * Luma does not publish a machine-readable schema, and several fields are
- * optional or vary between plan tiers. Object types therefore carry an index
- * signature so unmodelled fields remain accessible without a cast. When in
- * doubt, reach for {@link import("./client").LumaClient.request} and type the
- * response yourself.
+ * Object shapes (events, guests, ticket types, coupons…) are derived straight
+ * from Luma's published OpenAPI via {@link ResponseOf}, so they never drift
+ * from the live API. The hand-written pieces here are the ergonomic *inputs* —
+ * camelCase option objects the client maps onto Luma's snake_case wire format —
+ * plus a couple of unions the spec leaves open. For anything not modelled as a
+ * resource method, reach for {@link import("./client").LumaClient.request} and
+ * the {@link ResponseOf}/{@link QueryOf}/{@link BodyOf} helpers.
  */
+import type { BodyOf, ResponseOf } from "./openapi";
 
 /** A cursor-paginated list response. */
 export interface LumaPaginatedResponse<T> {
@@ -25,161 +28,119 @@ export interface LumaPaginationOptions {
 
 // ─── Events ──────────────────────────────────────────────────────────────
 
-export interface LumaEventTag {
-	api_id: string;
-	name: string;
-	[key: string]: unknown;
-}
+/** A full event, as returned by `GET /v1/events/get`. */
+export type LumaEvent = ResponseOf<"/v1/events/get", "get">;
 
-export interface LumaEventLocation {
-	type?: string;
-	name?: string;
-	address?: string;
-	[key: string]: unknown;
-}
-
-export interface LumaEvent {
-	api_id: string;
-	name: string;
-	description?: string;
-	start_at: string;
-	end_at?: string;
-	timezone?: string;
-	url?: string;
-	cover_url?: string;
-	visibility?: string;
-	location?: LumaEventLocation;
-	guest_limit?: number | null;
-	guest_count?: number;
-	[key: string]: unknown;
-}
-
-/**
- * An entry in `calendar/list-events`. Luma nests the event under `event` and
- * places calendar-scoped metadata (tags) alongside it.
- */
-export interface LumaCalendarEntry {
-	api_id?: string;
-	event?: LumaEvent;
-	tags?: LumaEventTag[];
-	[key: string]: unknown;
-}
+/** An event as listed on a calendar (`GET /v1/calendars/events/list`). */
+export type LumaCalendarEvent = ResponseOf<
+	"/v1/calendars/events/list",
+	"get"
+>["entries"][number];
 
 export interface ListCalendarEventsOptions extends LumaPaginationOptions {
-	/** Calendar to list events for. Required. */
-	calendarApiId: string;
 	/** Only events starting at or after this instant. */
 	after?: Date | string;
 	/** Only events starting at or before this instant. */
 	before?: Date | string;
+	/** Filter by calendar submission status. Defaults to `approved`. */
+	status?: "approved" | "pending";
+	/**
+	 * Which access levels to include. Defaults to `["manage"]`. Include
+	 * `"view"` to also return events the calendar lists but doesn't manage.
+	 */
+	access?: Array<"manage" | "view">;
+	/** Event platforms to include. Defaults to `["luma"]`. */
+	platforms?: Array<"luma" | "external">;
+	sortDirection?: "asc" | "desc";
 }
 
-// ─── People ──────────────────────────────────────────────────────────────
+// ─── Contacts (people) ─────────────────────────────────────────────────────
 
-export interface LumaPerson {
-	api_id: string;
-	name?: string;
-	email?: string;
-	avatar_url?: string;
-	[key: string]: unknown;
-}
+/** A contact on the calendar (`GET /v1/calendars/contacts/list`). */
+export type LumaContact = ResponseOf<
+	"/v1/calendars/contacts/list",
+	"get"
+>["entries"][number];
 
-export interface ListCalendarPeopleOptions extends LumaPaginationOptions {
-	calendarApiId: string;
+export interface ListContactsOptions extends LumaPaginationOptions {
+	/** Free-text search over name/email. */
+	query?: string;
+	sortDirection?: "asc" | "desc";
 }
 
 // ─── Guests ──────────────────────────────────────────────────────────────
 
+/** A guest as listed on an event (`GET /v1/events/guests/list`). */
+export type LumaGuest = ResponseOf<"/v1/events/guests/list", "get">["entries"][number];
+
+/** A single guest with order detail (`GET /v1/events/guests/get`). */
+export type LumaGuestDetail = ResponseOf<"/v1/events/guests/get", "get">;
+
+/**
+ * Approval status of a guest. The status *values* Luma accepts on
+ * update-status come from the spec; guests may additionally surface as
+ * `invited`, and the open-ended member keeps forward compatibility.
+ */
 export type LumaGuestApprovalStatus =
-	| "approved"
-	| "declined"
-	| "pending_approval"
-	| "waitlist"
+	| NonNullable<BodyOf<"/v1/events/guests/update-status", "post">>["status"]
 	| "invited"
 	| (string & {});
 
-export interface LumaGuest {
-	api_id: string;
-	name?: string;
-	email?: string;
-	user_api_id?: string;
-	approval_status?: LumaGuestApprovalStatus;
-	registered_at?: string;
-	checked_in_at?: string | null;
-	event_ticket?: {
-		api_id?: string;
-		name?: string;
-		[key: string]: unknown;
-	};
-	/** Answers to the event's registration questions, when present. */
-	registration_answers?: Array<{
-		label?: string;
-		answer?: string;
-		question_id?: string;
-		[key: string]: unknown;
-	}>;
-	[key: string]: unknown;
-}
-
-/** An entry in `event/get-guests`. Luma nests the guest under `guest`. */
-export interface LumaGuestEntry {
-	api_id?: string;
-	guest?: LumaGuest;
-	[key: string]: unknown;
-}
-
 export interface ListEventGuestsOptions extends LumaPaginationOptions {
-	eventApiId: string;
-	/** Filter by approval status, when supported by the endpoint. */
+	eventId: string;
+	/** Filter by approval status. */
 	approvalStatus?: LumaGuestApprovalStatus;
+	sortDirection?: "asc" | "desc";
 }
 
 export interface GetEventGuestOptions {
-	eventApiId: string;
-	/** Look the guest up by their guest api_id… */
-	guestApiId?: string;
-	/** …or by the email they registered with. One of the two is required. */
-	email?: string;
+	eventId: string;
+	/** The guest's id (`gst-…`). */
+	guestId: string;
 }
 
 export interface UpdateGuestStatusOptions {
-	eventApiId: string;
-	guestApiId: string;
+	eventId: string;
+	guestId: string;
 	status: LumaGuestApprovalStatus;
+	/** Refund the guest's tickets when declining, if applicable. */
+	shouldRefund?: boolean;
+	/** Whether Luma emails the guest about the change. */
+	sendEmail?: boolean;
+	/** Optional message included in the notification. */
+	message?: string;
+}
+
+/** A guest to add via {@link import("./client").LumaClient.events.addGuests}. */
+export interface AddGuestInput {
+	email: string;
+	name?: string;
+	/** Answers to the event's registration questions, if any. */
+	registrationAnswers?: unknown[];
+}
+
+export interface AddGuestsOptions {
+	eventId: string;
+	/** The guests to add. At least one is required. */
+	guests: AddGuestInput[];
+	/** Assign one ticket of this ticket type to each added guest. */
+	ticketTypeId?: string;
+	/** Initial status. Defaults to `approved` ("Going"). */
+	approvalStatus?: "approved" | "pending_approval" | "waitlist";
+	/** Whether Luma emails each added guest. Defaults to true. */
+	sendEmail?: boolean;
 }
 
 // ─── Ticket types ────────────────────────────────────────────────────────
 
-/**
- * A ticket type (tier) on an event, as returned by
- * `/v1/events/ticket-types/*`. Prices are in the currency's minor unit
- * (`cents`); free tickets carry `type: "free"` and a null price.
- */
-export interface LumaTicketType {
-	/** Ticket-type id, usually prefixed `evtticktype-`. */
-	id: string;
-	name: string;
-	/** `"free"` or `"paid"`. Luma may introduce further values. */
-	type: "free" | "paid" | (string & {});
-	/** Price in the currency's minor unit (e.g. `4000` = €40), or null. */
-	cents: number | null;
-	/** ISO 4217 code, lower-cased as Luma returns it (e.g. `eur`), or null. */
-	currency: string | null;
-	/** Whether the buyer may choose the amount (pay-what-you-want). */
-	is_flexible?: boolean;
-	/** For flexible tickets, the minimum amount in minor units. */
-	min_cents?: number | null;
-	require_approval?: boolean;
-	is_hidden?: boolean;
-	description?: string | null;
-	valid_start_at?: string | null;
-	valid_end_at?: string | null;
-	max_capacity?: number | null;
-	[key: string]: unknown;
-}
+/** A ticket type (tier) on an event, incl. price (`cents`/`currency`). */
+export type LumaTicketType = ResponseOf<
+	"/v1/events/ticket-types/list",
+	"get"
+>["entries"][number];
 
 export interface ListTicketTypesOptions {
-	eventApiId: string;
+	eventId: string;
 	/** Include hidden ticket types in the result. */
 	includeHidden?: boolean;
 }
@@ -189,7 +150,7 @@ interface TicketTypeWriteFields {
 	name?: string;
 	/** Price in the currency's minor unit. Required for paid tickets. */
 	cents?: number | null;
-	/** ISO 4217 code (e.g. `eur`). */
+	/** ISO 4217 code (e.g. `eur`); lower-cased by the client. */
 	currency?: string | null;
 	requireApproval?: boolean;
 	isHidden?: boolean;
@@ -203,50 +164,23 @@ interface TicketTypeWriteFields {
 }
 
 export interface CreateTicketTypeInput extends TicketTypeWriteFields {
-	eventApiId: string;
+	eventId: string;
 	name: string;
 	type: "free" | "paid";
 }
 
 export interface UpdateTicketTypeInput extends TicketTypeWriteFields {
-	ticketTypeApiId: string;
+	ticketTypeId: string;
 	type?: "free" | "paid";
-}
-
-/** A guest to add via {@link import("./client").LumaClient.events.addGuests}. */
-export interface AddGuestInput {
-	email: string;
-	name?: string;
-	/** Answers to the event's registration questions, if any. */
-	registrationAnswers?: unknown[];
-}
-
-export interface AddGuestsOptions {
-	eventApiId: string;
-	/** The guests to add. At least one is required. */
-	guests: AddGuestInput[];
-	/** Assign one ticket of this ticket type to each added guest. */
-	ticketTypeApiId?: string;
-	/** Initial status. Defaults to `approved` ("Going"). */
-	approvalStatus?: LumaGuestApprovalStatus;
-	/** Whether Luma emails each added guest. Defaults to true. */
-	sendEmail?: boolean;
 }
 
 // ─── Coupons ─────────────────────────────────────────────────────────────
 
-export interface LumaCoupon {
-	api_id: string;
-	code: string;
-	[key: string]: unknown;
-}
-
-export interface LumaCouponEntry {
-	api_id?: string;
-	id?: string;
-	code?: string;
-	[key: string]: unknown;
-}
+/** A coupon on the calendar (`/v1/calendars/coupons`). */
+export type LumaCoupon = ResponseOf<
+	"/v1/calendars/coupons/list",
+	"get"
+>["entries"][number];
 
 export interface CreateCalendarCouponInput {
 	code: string;

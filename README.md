@@ -27,25 +27,32 @@ import { LumaClient } from "@ingram-tech/luma";
 const luma = new LumaClient({ apiKey: process.env.LUMA_API_KEY! });
 // or: const luma = LumaClient.fromEnv();   // reads LUMA_API_KEY
 
-// Iterate every event on a calendar (auto-paginates).
-for await (const entry of luma.calendar.listEvents({ calendarApiId })) {
-	console.log(entry.event?.name);
+// Iterate every event the calendar manages (auto-paginates). The calendar is
+// inferred from the API key — no calendar id needed.
+for await (const event of luma.calendar.listEvents()) {
+	console.log(event.id, event.name);
 }
 
 // …or collect them into an array.
-const events = await luma.calendar.listAllEvents({ calendarApiId });
+const events = await luma.calendar.listAllEvents();
 
 // Guests of an event.
-const guests = await luma.events.listAllGuests({ eventApiId });
+const guests = await luma.events.listAllGuests({ eventId });
 
-// A single guest, by email.
-const guest = await luma.events.getGuest({ eventApiId, email: "a@b.com" });
+// A single guest (with order detail), by guest id.
+const guest = await luma.events.getGuest({ eventId, guestId: "gst-…" });
 
 // Approve a guest.
-await luma.events.updateGuestStatus({
-	eventApiId,
-	guestApiId: guest.api_id,
-	status: "approved",
+await luma.events.updateGuestStatus({ eventId, guestId: guest.id, status: "approved" });
+
+// Ticket types, including prices (cents / currency).
+const tiers = await luma.events.listTicketTypes({ eventId });
+
+// Register a guest (host-side — does NOT take payment; Luma owns checkout).
+await luma.events.addGuests({
+	eventId,
+	guests: [{ email: "a@b.com", name: "Ada Lovelace" }],
+	ticketTypeId: tiers[0]?.id,
 });
 
 // Coupons.
@@ -58,21 +65,25 @@ const coupon = await luma.calendar.createCoupon({
 
 ### Pagination
 
-Cursor-paginated methods (`listEvents`, `listPeople`, `listGuests`,
+Cursor-paginated methods (`listEvents`, `listContacts`, `listGuests`,
 `listCoupons`) return an `AsyncGenerator` that follows `next_cursor`
 automatically. Each has a `listAll…` sibling that drains it into an array.
 `collect()` is exported for draining any async iterable.
 
 ### Escape hatches
 
-The typed methods cover the endpoints this client is built around. For
-anything not modelled, call the API directly — both methods are public:
+The typed methods cover the common endpoints. For anything else, call the API
+directly — `request` and `paginate` are public, and the `ResponseOf` /
+`QueryOf` / `BodyOf` helpers type *any* endpoint straight from the spec:
 
 ```ts
-// Any endpoint, typed by you.
-const data = await luma.request<MyType>("/v1/event/get", {
-	query: { api_id: eventApiId },
-});
+import type { ResponseOf } from "@ingram-tech/luma";
+
+// `data` is typed as the endpoint's real response — no hand-written type.
+const data = await luma.request<ResponseOf<"/v1/events/get", "get">>(
+	"/v1/events/get",
+	{ query: { event_id: eventId } },
+);
 
 // Any cursor-paginated endpoint.
 for await (const entry of luma.paginate<MyEntry>("/v1/some/list", { foo: "bar" })) {
@@ -84,8 +95,7 @@ for await (const entry of luma.paginate<MyEntry>("/v1/some/list", { foo: "bar" }
 options, e.g. Next.js cache hints:
 
 ```ts
-await luma.request("/v1/calendar/list-events", {
-	query: { calendar_api_id },
+await luma.request("/v1/calendars/events/list", {
 	fetchInit: { next: { revalidate: 300 } },
 });
 ```
@@ -114,25 +124,28 @@ try {
 | Area | Methods |
 | --- | --- |
 | Calendar events | `calendar.listEvents`, `calendar.listAllEvents` |
-| Calendar people | `calendar.listPeople`, `calendar.listAllPeople` |
+| Calendar contacts | `calendar.listContacts`, `calendar.listAllContacts` |
 | Coupons | `calendar.listCoupons`, `calendar.findCouponByCode`, `calendar.createCoupon` |
 | Events | `events.get` |
 | Guests | `events.listGuests`, `events.listAllGuests`, `events.getGuest`, `events.updateGuestStatus`, `events.addGuests` |
 | Ticket types | `events.listTicketTypes`, `events.getTicketType`, `events.createTicketType`, `events.updateTicketType`, `events.deleteTicketType` |
-| Anything else | `request`, `paginate` |
+| Anything else | `request`, `paginate` (typed via `ResponseOf`/`QueryOf`/`BodyOf`) |
 
-The ticket-type and `addGuests` methods are modelled from Luma's published
-OpenAPI (`https://public-api.luma.com/openapi.json`). Note the API has no
-checkout/payment endpoint — `addGuests` registers a guest host-side but never
-takes payment; ticket purchase happens on Luma's own hosted checkout. Response
-objects carry an index signature, so unmodelled fields are always reachable.
-PRs welcome.
+Types are generated from Luma's published OpenAPI
+(`https://public-api.luma.com/openapi.json`) — run `bun run generate` to refresh
+`src/generated/openapi.ts` when the API changes. The convenience methods and
+their camelCase option objects are the only hand-written surface.
+
+Note the API has **no checkout/payment endpoint** — `addGuests` registers a
+guest host-side but never takes payment; ticket purchase happens on Luma's own
+hosted checkout.
 
 ## Development
 
 ```sh
 bun install
 bun run ci          # type-check, lint, test, build
+bun run generate    # regenerate types from Luma's OpenAPI
 bun run test        # watch mode
 ```
 

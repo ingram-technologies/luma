@@ -1,6 +1,6 @@
 {
 	"name": "@ingram-tech/luma",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"description": "TypeScript client for the Luma (lu.ma) public API.",
 	"license": "MIT",
 	"author": "Ingram Technologies",
@@ -36,6 +36,7 @@
 	"scripts": {
 		"build": "tsup",
 		"prepack": "bun run build",
+		"generate": "curl -sSf https://public-api.luma.com/openapi.json -o openapi.json && openapi-typescript openapi.json -o src/generated/openapi.ts && biome format --write src/generated/openapi.ts",
 		"lint": "biome check .",
 		"format": "biome format --write .",
 		"type-check": "tsc --noEmit",
@@ -49,6 +50,7 @@
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.1",
 		"@types/node": "^26.0.1",
+		"openapi-typescript": "^7.13.0",
 		"tsup": "^8.5.1",
 		"typescript": "^5.9.3",
 		"vitest": "^4.1.9"

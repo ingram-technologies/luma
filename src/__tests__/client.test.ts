@@ -106,38 +106,32 @@ describe("LumaClient.paginate", () => {
 });
 
 describe("LumaClient.calendar", () => {
-	it("lists every event across pages with the calendar id attached", async () => {
+	it("lists every event across pages (calendar inferred from the key)", async () => {
 		const { fetchImpl, calls } = mockFetch((_call, index) =>
 			index === 0
 				? json({
-						entries: [
-							{ event: { api_id: "e1", name: "A", start_at: "x" } },
-						],
+						entries: [{ id: "evt-1", name: "A", start_at: "x" }],
 						has_more: true,
 						next_cursor: "next",
 					})
 				: json({
-						entries: [
-							{ event: { api_id: "e2", name: "B", start_at: "y" } },
-						],
+						entries: [{ id: "evt-2", name: "B", start_at: "y" }],
 						has_more: false,
 					}),
 		);
 		const client = new LumaClient({ apiKey: "k", fetch: fetchImpl });
 
-		const events = await client.calendar.listAllEvents({
-			calendarApiId: "cal-123",
-		});
+		const events = await client.calendar.listAllEvents();
 
-		expect(events.map((e) => e.event?.api_id)).toEqual(["e1", "e2"]);
-		expect(requireCall(calls, 0).url.searchParams.get("calendar_api_id")).toBe(
-			"cal-123",
-		);
+		expect(events.map((e) => e.id)).toEqual(["evt-1", "evt-2"]);
+		const call = requireCall(calls, 0);
+		expect(call.url.pathname).toBe("/v1/calendars/events/list");
+		expect(call.url.searchParams.has("calendar_api_id")).toBe(false);
 	});
 
 	it("maps an amount discount when creating a coupon", async () => {
 		const { fetchImpl, calls } = mockFetch(() =>
-			json({ coupon: { api_id: "cp_1", code: "SUMMIT" } }),
+			json({ id: "cp_1", code: "SUMMIT" }),
 		);
 		const client = new LumaClient({ apiKey: "k", fetch: fetchImpl });
 
@@ -147,8 +141,9 @@ describe("LumaClient.calendar", () => {
 			discount: { type: "amount", centsOff: 4000, currency: "EUR" },
 		});
 
-		expect(coupon).toMatchObject({ api_id: "cp_1", code: "SUMMIT" });
+		expect(coupon).toMatchObject({ id: "cp_1", code: "SUMMIT" });
 		const call = requireCall(calls, 0);
+		expect(call.url.pathname).toBe("/v1/calendars/coupons/create");
 		expect(call.init.method).toBe("POST");
 		const body = JSON.parse(call.init.body as string);
 		expect(body.discount).toEqual({
@@ -165,40 +160,45 @@ describe("LumaClient.events", () => {
 		const client = new LumaClient({ apiKey: "k", fetch: fetchImpl });
 
 		await client.events.updateGuestStatus({
-			eventApiId: "evt-1",
-			guestApiId: "gst-1",
+			eventId: "evt-1",
+			guestId: "gst-1",
 			status: "approved",
 		});
 
 		const call = requireCall(calls, 0);
+		expect(call.url.pathname).toBe("/v1/events/guests/update-status");
 		expect(call.init.method).toBe("POST");
 		expect(JSON.parse(call.init.body as string)).toEqual({
-			event_api_id: "evt-1",
-			guest_api_id: "gst-1",
+			event_id: "evt-1",
+			guest_id: "gst-1",
 			status: "approved",
 		});
 	});
 
-	it("unwraps the nested guest object from get-guests entries", async () => {
-		const { fetchImpl } = mockFetch(() =>
+	it("lists guests straight from entries", async () => {
+		const { fetchImpl, calls } = mockFetch(() =>
 			json({
-				entries: [{ guest: { api_id: "g1", email: "a@b.com" } }],
+				entries: [{ id: "gst-1", user_email: "a@b.com" }],
 				has_more: false,
 			}),
 		);
 		const client = new LumaClient({ apiKey: "k", fetch: fetchImpl });
 
-		const guests = await client.events.listAllGuests({ eventApiId: "evt-1" });
-		expect(guests).toEqual([{ api_id: "g1", email: "a@b.com" }]);
+		const guests = await client.events.listAllGuests({ eventId: "evt-1" });
+		expect(guests).toEqual([{ id: "gst-1", user_email: "a@b.com" }]);
+		expect(requireCall(calls, 0).url.pathname).toBe("/v1/events/guests/list");
 	});
 
-	it("requires a lookup key for getGuest", async () => {
-		const { fetchImpl } = mockFetch(() => json({}));
+	it("gets a single guest by id", async () => {
+		const { fetchImpl, calls } = mockFetch(() => json({ id: "gst-1" }));
 		const client = new LumaClient({ apiKey: "k", fetch: fetchImpl });
 
-		await expect(client.events.getGuest({ eventApiId: "evt-1" })).rejects.toThrow(
-			/guestApiId|email/,
-		);
+		await client.events.getGuest({ eventId: "evt-1", guestId: "gst-1" });
+
+		const call = requireCall(calls, 0);
+		expect(call.url.pathname).toBe("/v1/events/guests/get");
+		expect(call.url.searchParams.get("event_id")).toBe("evt-1");
+		expect(call.url.searchParams.get("id")).toBe("gst-1");
 	});
 
 	it("lists ticket types, returning entries", async () => {
@@ -218,7 +218,7 @@ describe("LumaClient.events", () => {
 		const client = new LumaClient({ apiKey: "k", fetch: fetchImpl });
 
 		const types = await client.events.listTicketTypes({
-			eventApiId: "evt-1",
+			eventId: "evt-1",
 			includeHidden: true,
 		});
 
@@ -244,7 +244,7 @@ describe("LumaClient.events", () => {
 		const client = new LumaClient({ apiKey: "k", fetch: fetchImpl });
 
 		const created = await client.events.createTicketType({
-			eventApiId: "evt-1",
+			eventId: "evt-1",
 			name: "VIP",
 			type: "paid",
 			cents: 9900,
@@ -272,9 +272,9 @@ describe("LumaClient.events", () => {
 		const client = new LumaClient({ apiKey: "k", fetch: fetchImpl });
 
 		await client.events.addGuests({
-			eventApiId: "evt-1",
+			eventId: "evt-1",
 			guests: [{ email: "a@b.com", name: "Ada" }],
-			ticketTypeApiId: "tt1",
+			ticketTypeId: "tt1",
 			sendEmail: false,
 		});
 
