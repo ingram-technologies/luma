@@ -34,7 +34,7 @@
 		"access": "public"
 	},
 	"scripts": {
-		"build": "tsup",
+		"build": "tsdown",
 		"prepack": "bun run build",
 		"generate": "curl -sSf https://public-api.luma.com/openapi.json -o openapi.json && openapi-typescript openapi.json -o src/generated/openapi.ts && biome format --write src/generated/openapi.ts",
 		"lint": "biome check .",
@@ -48,11 +48,11 @@
 		"node": ">=18"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.5.1",
-		"@types/node": "^26.0.1",
+		"@biomejs/biome": "^2.5.3",
+		"@types/node": "^26.1.1",
 		"openapi-typescript": "^7.13.0",
-		"tsup": "^8.5.1",
-		"typescript": "^5.9.3",
-		"vitest": "^4.1.9"
+		"tsdown": "^0.22.4",
+		"typescript": "^7.0.2",
+		"vitest": "^4.1.10"
 	}
 }
