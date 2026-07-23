@@ -2,6 +2,11 @@
 	"compilerOptions": {
 		"target": "ESNext",
 		"lib": ["ESNext", "DOM"],
+		// Declared explicitly: TS7 no longer pulls every node_modules/@types
+		// package into the global scope on its own, and `fromEnv` needs the
+		// `process` global. Naming the one package we depend on also keeps the
+		// other installed @types (chai, estree) out of this library's globals.
+		"types": ["node"],
 		"module": "ESNext",
 		"moduleResolution": "bundler",
 		"strict": true,
